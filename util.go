@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
+	"encoding/binary"
 	"encoding/hex"
 	"net"
 	"net/http"
@@ -19,6 +21,7 @@ var regexPath *regexp.Regexp
 var regexPathReplaced *regexp.Regexp
 var regex_num *regexp.Regexp
 var regexfileindex *regexp.Regexp
+var md5lock sync.RWMutex
 
 func init() {
 	dnsMap = make(map[string][]string)
@@ -108,15 +111,58 @@ func stringPadding(input, pad string, len int) string {
 	return input
 }
 
-func getNumTag(rawUri string)string{
+func getNumTag(rawUri string) string {
 	if regexfileindex.MatchString(rawUri) {
 		return stringPadding(
-		strings.TrimRight(strings.TrimLeft(regexfileindex.FindString(rawUri), "fileindex="), ";"),
-		"0", 9)
+			strings.TrimRight(strings.TrimLeft(regexfileindex.FindString(rawUri), "fileindex="), ";"),
+			"0", 9)
 	}
 	return ""
 }
 
-func nop(){
-	
+func nop() {
+
+}
+
+func getName(s string) string {
+	regexpClear, _ := regexp.Compile("[^\\w\\W\\d\\D\\[\\]]|\\\\|\\/|:|\\*|\\?|\"|<|>|\\||_|\\s")
+	if len(s) > 0 {
+		s = regexpClear.ReplaceAllString(s, "")
+		if utf8.RuneCountInString(s) > 30 {
+			s = Substr2(s, 20, 30)
+		} else if utf8.RuneCountInString(s) > 20 {
+			s = Substr2(s, 9, 20)
+		} else if utf8.RuneCountInString(s) > 10 {
+			s = Substr2(s, 1, 9)
+		}
+	}
+	return s
+}
+
+func u2s(form string) (to string, err error) {
+	bs, err := hex.DecodeString(strings.Replace(form, `\u`, ``, -1))
+	if err != nil {
+		return
+	}
+	for i, bl, br, r := 0, len(bs), bytes.NewReader(bs), uint16(0); i < bl; i += 2 {
+		binary.Read(br, binary.BigEndian, &r)
+		to += string(r)
+	}
+	return
+}
+
+func hackQueryUnescape(s string) (string, error) {
+	ragexpUnicode, _ := regexp.Compile(`%u[\w]{4}`)
+	s = ragexpUnicode.ReplaceAllStringFunc(s, func(m string) string {
+		u, err := u2s(strings.Replace(m, "%", `\`, -1))
+		if err != nil {
+			return m
+		}
+		return url.QueryEscape(u)
+	})
+	s, err := url.QueryUnescape(s)
+	if err != nil {
+		return "", err
+	}
+	return s, nil
 }

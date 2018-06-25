@@ -5,17 +5,17 @@ import (
 	"bytes"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"log"
-	"regexp"
-	"path"
 )
 
 var requestImg chan RequestOptions
@@ -40,8 +40,8 @@ type TaskResult struct {
 	Type0  string
 }
 
-type DiffMap struct{
-	MD5 string
+type DiffMap struct {
+	MD5  string
 	Path string
 }
 
@@ -57,8 +57,6 @@ const (
 	TCACHED  = 3
 	TFAIL    = 100
 )
-
-
 
 func init() {
 	requestImg = make(chan RequestOptions, 20)
@@ -89,20 +87,21 @@ func work_2() {
 		imgUrlOptions := <-requestImg
 		itbusy(FlagWorkType2, workid)
 		imgUrl := imgUrlOptions.ImgUri
-		
+
 		// use cached
-		numtag:=getNumTag(imgUrlOptions.ImgUri)
-		if numtag!="" && imgUrlOptions.Type0 !=""{
-			diffmaplock.RLock()	
-			if _, ok := diffsource[imgUrlOptions.Type0+"_"+numtag];ok{
+		numtag := getNumTag(imgUrlOptions.ImgUri)
+		if numtag != "" && imgUrlOptions.Type0 != "" {
+			diffmaplock.RLock()
+			if _, ok := diffsource[imgUrlOptions.Type0+"_"+numtag]; ok {
 				diffmaplock.RUnlock()
-				imgUrlOptions.Notice<-SUCCESSFULCACHED
+				imgUrlOptions.Notice <- SUCCESSFULCACHED
 				continue
 			}
 			diffmaplock.RUnlock()
 		}
-
+		md5lock.Lock()
 		md5s := getMD5(imgUrl)
+		md5lock.Unlock()
 		tasklock.Lock()
 		if stat, ok := task[md5s]; ok {
 			if stat == TLOG {
@@ -110,9 +109,9 @@ func work_2() {
 				// imgUrlOptions.Notice<-Wait
 				continue
 			}
-			if stat == TSUCCESS ||stat == TCACHED {
+			if stat == TSUCCESS || stat == TCACHED {
 				tasklock.Unlock()
-				imgUrlOptions.Notice<-SUCCESSFUL
+				imgUrlOptions.Notice <- SUCCESSFUL
 				continue
 			}
 			// task[md5s] = TLOG
@@ -153,14 +152,16 @@ func work_2() {
 					ConnPool.recycleChan <- 1
 					logger.Printf("download {%s} ...err:{%s}\n", imgUrl, err.Error())
 					if strings.HasSuffix(err.Error(), "EOF") {
+						nop()
+						nop()
 						goto retry
 					}
 					if !cp.IsProxy {
-						//useProxy++
-						//goto retry
+						// useProxy++
+						// goto retry
 					}
 					tasklock.Lock()
-					task[md5s] = FAILED
+					task[md5s] = TFAIL
 					tasklock.Unlock()
 					imgUrlOptions.Notice <- FAILED
 					break
@@ -181,6 +182,10 @@ func work_2() {
 				break
 			}
 			if time.Now().Sub(watch.Add(time.Second*5)) > 0 {
+				tasklock.Lock()
+				task[md5s] = TFAIL
+				tasklock.Unlock()
+				imgUrlOptions.Notice <- FAILED
 				break
 			}
 			time.Sleep(time.Second * 1)
@@ -213,7 +218,7 @@ func fetchImg(cp *ConnProxy, rawurl string, type0 string, notice2 chan int32) (e
 	if err != nil {
 		return err, k
 	}
-	if len(b)==28{
+	if len(b) == 28 {
 		Montior.Lock.Lock()
 		Montior.serverNot++
 		Montior.Lock.Unlock()
@@ -232,21 +237,21 @@ func fetchImg(cp *ConnProxy, rawurl string, type0 string, notice2 chan int32) (e
 
 	// cache it
 	tasklock.Lock()
+	task[md5] = TSUCCESS
 	taskResult[md5] = TaskResult{
 		RawUri: rawurl,
 		Buf:    &temp,
 		Type0:  type0,
 	}
-	task[md5] = TSUCCESS
 	tasklock.Unlock()
 	numtag := getNumTag(rawurl)
-	if type0!=""&&numtag!=""{
-		numtag = type0+"_"+numtag
+	if type0 != "" && numtag != "" {
+		numtag = type0 + "_" + numtag
 		diffmaplock.Lock()
-		if _, ok := diffsource[numtag];!ok{
-			diffsource[numtag]=DiffMap{
-				MD5:md5,
-				Path:numtag+"_"+md5+path.Ext(rawurl),
+		if _, ok := diffsource[numtag]; !ok {
+			diffsource[numtag] = DiffMap{
+				MD5:  md5,
+				Path: numtag + "_" + md5 + path.Ext(rawurl),
 			}
 		}
 		diffmaplock.Unlock()
@@ -259,31 +264,29 @@ func fetchImg(cp *ConnProxy, rawurl string, type0 string, notice2 chan int32) (e
 	return nil, !resp.Close
 }
 
-
-
-func Init(){
+func Init() {
 	dir_list, err := ioutil.ReadDir("cache")
 	Montior.before = len(dir_list)
-	if err!=nil{
-        log.Fatal(err)
+	if err != nil {
+		log.Fatal(err)
 	}
-	regexp_md5, _:= regexp.Compile("_[^\\.]+\\.")
-	regexp_num, _:=  regexp.Compile("_[^_]+_")
-    for _, v := range dir_list {
-	    md5 := strings.TrimRight(regexp_num.ReplaceAllString(regexp_md5.FindString(v.Name()), ""), ".")
-		if _, ok := task[md5];!ok{
+	regexp_md5, _ := regexp.Compile("_[^\\.]+\\.")
+	regexp_num, _ := regexp.Compile("_[^_]+_")
+	for _, v := range dir_list {
+		md5 := strings.TrimRight(regexp_num.ReplaceAllString(regexp_md5.FindString(v.Name()), ""), ".")
+		if _, ok := task[md5]; !ok {
 			task[md5] = TCACHED
 		}
-		sp :=strings.Split(v.Name(), "_")
-		if len(sp)>1{
-			if(sp[0]!="unknow"&&sp[1]!="unknow"){
-				key:=strings.Join(sp[:2], "_")
-				if _, ok :=diffsource[key];!ok{
-				    diffsource[key] = DiffMap{
-						MD5:md5,
-						Path:v.Name(),
+		sp := strings.Split(v.Name(), "_")
+		if len(sp) > 1 {
+			if sp[0] != "unknow" && sp[1] != "unknow" {
+				key := strings.Join(sp[:2], "_")
+				if _, ok := diffsource[key]; !ok {
+					diffsource[key] = DiffMap{
+						MD5:  md5,
+						Path: v.Name(),
 					}
-				}	
+				}
 			}
 		}
 	}
@@ -297,46 +300,29 @@ func run_cached() {
 		var todo []string
 		tasklock.RLock()
 		for md5, stat := range task {
-			if stat==TSUCCESS{
-				todo=append(todo, md5)
-				nop()
-				nop()
+			if stat == TSUCCESS {
+				todo = append(todo, md5)
 			}
 		}
 		tasklock.RUnlock()
-		// tasklock.RLock()
 		for _, md5 := range todo {
-			// if stat == TSUCCESS {
-				// tasklock.RUnlock()
-				
-				tasklock.Lock()
-				if temp, _ := task[md5]; temp == TSUCCESS {
-					file, err := os.OpenFile("./cache/"+getFileName(taskResult[md5].RawUri, taskResult[md5].Type0), os.O_CREATE, 0666)
-					if err != nil {
-						logger.Panicln(err)
-					}
-					// taskResult[md5].Buf.Reset()
-					if _, ok:=taskResult[md5];!ok{
-						nop()
-						nop()
-					}
-					if taskResult[md5].Buf==nil{
-						nop()
-						nop()
-					}
-					if _, err := taskResult[md5].Buf.WriteTo(file); err == nil {
-						task[md5] = TCACHED
-						delete(taskResult, md5)
-					} else {
-						logger.Println(err)
-					}
-					file.Close()
+			tasklock.Lock()
+			if temp, _ := task[md5]; temp == TSUCCESS {
+				file, err := os.OpenFile("./cache/"+getFileName(taskResult[md5].RawUri, taskResult[md5].Type0), os.O_CREATE, 0666)
+				if err != nil {
+					logger.Panicln(err)
 				}
-				tasklock.Unlock()
-				// tasklock.RLock()
-			// }
+				if _, err := taskResult[md5].Buf.WriteTo(file); err == nil {
+					task[md5] = TCACHED
+					delete(taskResult, md5)
+				} else {
+					logger.Println(err)
+				}
+				file.Close()
+			}
+			tasklock.Unlock()
 		}
-		// tasklock.RUnlock()
+
 		// time.AfterFunc(time.Second*2, func() {
 		// 	CachedNotice <- 2
 		// })

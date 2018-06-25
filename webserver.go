@@ -4,49 +4,39 @@ import (
 	"bytes"
 	"log"
 	"net/http"
+	"net/url"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-	"unicode/utf8"
-	"net/url"
-	"encoding/binary"
-	"encoding/hex"
 )
 
 var re *regexp.Regexp
 var regexpTirmRand *regexp.Regexp
-var regexpClear  *regexp.Regexp
+var regexpClear *regexp.Regexp
 var ragexptype *regexp.Regexp
 var ragexpup5 *regexp.Regexp
+var logmap map[string]int32
+var logmaplock sync.RWMutex
 
 const (
-	SUCCESSFUL = 1
-	FAILED     = 2
+	SUCCESSFUL       = 1
+	FAILED           = 2
 	SUCCESSFULCACHED = 3
-	Wait = 6
+	Wait             = 6
 )
 
 func init() {
 	re, _ = regexp.Compile(".*(img=[^&]*)(&rand=\\d*)?$")
 	regexpTirmRand, _ = regexp.Compile("&rand=\\d*$")
-	regexpClear, _=regexp.Compile("[^\\w\\W\\d\\D\\[\\]]|\\\\|\\/|:|\\*|\\?|\"|<|>|\\||_|\\s")
-	ragexptype, _=regexp.Compile("type=[^&]*&?")
-	ragexpup5, _=regexp.Compile("%u....")
+	regexpClear, _ = regexp.Compile("[^\\w\\W\\d\\D\\[\\]]|\\\\|\\/|:|\\*|\\?|\"|<|>|\\||_|\\s")
+	ragexptype, _ = regexp.Compile("type=[^&]*&?")
+	ragexpup5, _ = regexp.Compile("%u....")
+	logmap = make(map[string]int32)
 }
 
-func u2s(form string) (to string, err error) {
-    bs, err := hex.DecodeString(strings.Replace(form, `\u`, ``, -1))
-    if err != nil {
-        return
-    }
-    for i, bl, br, r := 0, len(bs), bytes.NewReader(bs), uint16(0); i < bl; i += 2 {
-        binary.Read(br, binary.BigEndian, &r)
-        to += string(r)
-    }
-    return
-}
 func run_server() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		Montior.Lock.Lock()
@@ -59,52 +49,32 @@ func run_server() {
 		}()
 		r.ParseForm()
 		v := r.Form["img"]
-		if len(v) > 0 && v[0]!=""{
+		if len(v) > 0 && v[0] != "" {
 			rawurl := strings.TrimPrefix(re.ReplaceAllString(r.URL.RawQuery, "$1"), "img=")
-		    rawurl, _ = url.QueryUnescape(rawurl)
+			rawurl, _ = url.QueryUnescape(rawurl)
 			// fmt.Println(r.URL.RawQuery, "---------------------")
 			append := ""
-			if ragexptype.MatchString(r.URL.RawQuery){
+			if ragexptype.MatchString(r.URL.RawQuery) {
 				typeP := ragexptype.FindString(r.URL.RawQuery)
-				typeP =strings.TrimRight(strings.TrimLeft(typeP, "type="), "&")
-				allup5 := ragexpup5.FindAllString(typeP, -1)
-				new := ""
-				if allup5!= nil{
-					for _,z:=range allup5{
-						ustr :=strings.Replace(z, "%", "\\", 1)
-						u, err := u2s(ustr)
-						if err!=nil{
-							dd:=2
-							dd++
-						}
-						escape := url.QueryEscape(u)
-						typeP = strings.Replace(typeP, z, escape, 1)
-						new+=u
-					}
-				}
-				unescape, err := url.QueryUnescape(typeP)
-				if err ==nil{
-					append=unescape
-					// logger.Println(append)
+				typeP = strings.TrimRight(strings.TrimLeft(typeP, "type="), "&")
+				unescape, err := hackQueryUnescape(typeP)
+				if err == nil {
+					append = getName(unescape)
 				}
 			}
-			if len(append) > 0 {
-				append = regexpClear.ReplaceAllString(append, "")
-				if utf8.RuneCountInString(append) > 30{
-					append = Substr2(append,20,30)
-				}else if utf8.RuneCountInString(append) > 20{
-					append = Substr2(append,9,20)
-				}else if utf8.RuneCountInString(append) > 10{
-					append = Substr2(append,1,9)
-				}else{
-					append = Substr2(append,0,utf8.RuneCountInString(append)-1)
-				}
-			}
+
 			chan0 := make(chan int32, 20) // must be greater than one
 
-			if(tryUseCache(rawurl, append)){
-				chan0<-SUCCESSFULCACHED
-			}else{
+			if tryUseCache(rawurl, append) {
+				chan0 <- SUCCESSFULCACHED
+			} else {
+				logmaplock.Lock()
+				if _, ok := logmap[rawurl]; !ok {
+					logmap[rawurl] = 1
+				} else {
+					logmap[rawurl] = logmap[rawurl] + 1
+				}
+				logmaplock.Unlock()
 				requestImg <- RequestOptions{
 					ImgUri: rawurl,
 					Type0:  append,
@@ -114,41 +84,29 @@ func run_server() {
 
 			md5 := getMD5(rawurl)
 			var diffmapping DiffMap
-			// watch := time.Now()
 
 			// over time
 			ticker := time.NewTicker(time.Second * 6)
 			select {
 			case nr := <-chan0:
-				if nr == SUCCESSFULCACHED{
-					// unsafe, but 
+				if nr == SUCCESSFULCACHED {
+					// unsafe, but
 					diffmapping = diffsource[append+"_"+getNumTag(rawurl)]
-					md5=diffmapping.MD5
+					md5 = diffmapping.MD5
 				}
 				if nr == SUCCESSFUL || nr == SUCCESSFULCACHED {
-					tasklock.RLock()
+					tasklock.RLock() // 多余
 					if stat, ok := task[md5]; ok && (stat == TSUCCESS || stat == TCACHED) {
-						tasklock.RUnlock()
+						tasklock.RUnlock() // 多余
 						tasklock.Lock()
 						if stat, ok := task[md5]; ok && (stat == TSUCCESS || stat == TCACHED) {
 							if stat == TSUCCESS {
 								w.Header().Set("Content-Type", "image/"+strings.TrimPrefix(path.Ext(rawurl), "."))
 								w.WriteHeader(200)
-								if _, ok:=taskResult[md5];!ok{
-									nop()
-									nop()
-								}
-								if taskResult[md5].Buf==nil{
-									nop()
-									nop()
-								}
-								temp:=taskResult[md5].Buf.Bytes()
+								temp := taskResult[md5].Buf.Bytes()
 
-								// taskResult[md5].Buf = bytes.NewBuffer(temp)
-								taskResult[md5].Buf.Reset()
-								taskResult[md5].Buf.Write(temp)
+								// taskResult[md5].Buf.WriteTo(w)
 								tasklock.Unlock()
-
 								w.Write(temp)
 							} else {
 								tasklock.Unlock()
@@ -156,27 +114,26 @@ func run_server() {
 								Montior.serverCached++
 								Montior.Lock.Unlock()
 								newuri := ""
-								if nr == SUCCESSFULCACHED{
+								if nr == SUCCESSFULCACHED {
 									newuri = "/cache/" + diffmapping.Path
-								}else {
+								} else {
 									newuri = "/cache/" + getFileName(rawurl, append)
 									nop()
 								}
 								w.Header().Set("Location", newuri)
 								w.WriteHeader(302)
 							}
-						}else {
+						} else {
 							tasklock.Unlock()
 						}
-
-					}else{
+					} else {
 						tasklock.RUnlock()
 					}
-				} else if nr==FAILED{
+				} else if nr == FAILED {
 					SendLocation(w, r.RequestURI)
-				}else if nr==Wait{
+				} else if nr == Wait {
 					// xxxxxxxxxxxxxx
-				}else{
+				} else {
 					w.WriteHeader(404)
 				}
 				return
@@ -233,11 +190,11 @@ func Substr2(str string, start int, end int) string {
 	return string(rs[start:end])
 }
 
-func tryUseCache(rawUri, type0 string) bool{
-	numtag:=getNumTag(rawUri)
-	if len(numtag) + len(type0) > 1{
-		diffmaplock.RLock()	
-		if _, ok := diffsource[type0+"_"+numtag];ok{
+func tryUseCache(rawUri, type0 string) bool {
+	numtag := getNumTag(rawUri)
+	if len(numtag)+len(type0) > 1 {
+		diffmaplock.RLock()
+		if _, ok := diffsource[type0+"_"+numtag]; ok {
 			diffmaplock.RUnlock()
 			return true
 		}

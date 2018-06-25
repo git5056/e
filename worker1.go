@@ -26,6 +26,11 @@ type ConnProxy struct {
 	c         int
 }
 
+type Signal struct {
+	*ConnProxy
+	nocice chan int32
+}
+
 type Statistic struct {
 	F  int
 	S  int
@@ -48,20 +53,14 @@ type ProxyItem struct {
 
 var proxies map[string]ProxyItem
 var proxiesditalmap map[int64]map[string]bool
+var connChanmap map[*ConnProxy]chan *ConnProxy
+var connChanmaplock sync.RWMutex
 
 const retryCount int = 3
 
 var work1id int32 = 0
 
-//var workid int = 1
-// var requestQ chan i
-// var requestP chan string
-// var logger *log.Logger
-
 func init() {
-	//requestQ = make(chan i, 20)
-	//requestP = make(chan string, 20)
-	//logger = log.New(os.Stdout, "logger :", log.Lshortfile)
 	ConnPool.connChan = make(chan *ConnProxy, 20)
 	ConnPool.conn = make(map[net.Conn]*ConnProxy)
 	ConnPool.mu = &sync.RWMutex{}
@@ -69,6 +68,7 @@ func init() {
 	ConnPool.ditaling = make(map[string]time.Time)
 	proxies = make(map[string]ProxyItem)
 	proxiesditalmap = make(map[int64]map[string]bool)
+	connChanmap = make(map[*ConnProxy]chan *ConnProxy)
 }
 
 func pushConn(dst string, useProxy bool, proxy string) {
@@ -100,6 +100,32 @@ func getConn(dst string) (*ConnProxy, int) {
 		pushConn(dst, false, "")
 	}
 	return nil, count
+}
+
+func getConn2(dst string) (*ConnProxy, chan *ConnProxy) {
+	ConnPool.mu.Lock()
+	defer ConnPool.mu.Unlock()
+	for _, cp := range ConnPool.conn {
+		if cp.Dst == dst && cp.IsBusy == false {
+			cp.IsBusy = true
+			return cp, nil
+		}
+	}
+	if _, ok := ConnPool.ditaling[dst]; !ok {
+		ConnPool.ditaling[dst] = time.Now()
+		pushConn(dst, false, "")
+	}
+	conn := ConnProxy{
+		Dst:     dst,
+		IsInit:  false,
+		c:       0,
+		IsProxy: false,
+		Proxy:   "",
+	}
+	ConnPool.connChan <- &conn
+	chan1 := make(chan *ConnProxy, 20)
+	connChanmap[&conn] = chan1
+	return nil, chan1
 }
 
 func getProxy(dst string, id int64) (*ConnProxy, int) {
@@ -229,6 +255,13 @@ func work_1() {
 		cp.Conn = conn
 		ConnPool.mu.Lock()
 		ConnPool.conn[conn] = cp
+		connChanmaplock.Lock()
+		if chan2, ok := connChanmap[cp]; ok {
+			cp.IsBusy = true
+			chan2 <- cp
+			delete(connChanmap, cp)
+		}
+		connChanmaplock.Unlock()
 		ConnPool.mu.Unlock()
 		if !cp.IsProxy {
 			removeDitaling(cp.Dst)
@@ -246,8 +279,6 @@ func run_1() {
 		for {
 			select {
 			case <-ticker.C:
-				dd := 2
-				dd++
 				ConnPool.recycleChan <- 1
 			}
 		}

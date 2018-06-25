@@ -1,8 +1,8 @@
 package main
 
 import (
-	"time"
 	"fmt"
+	"time"
 )
 
 func main() {
@@ -13,6 +13,7 @@ func main() {
 	// 	time.Sleep(time.Second)
 	// }
 	// main1()
+	server1Init()
 	Init()
 	run_1()
 	run_2()
@@ -28,7 +29,6 @@ func main() {
 	// 	// }
 	// 	// return
 
-
 	// montior
 	go run_m()
 	go runTimer()
@@ -40,9 +40,8 @@ func main() {
 
 	run_server1()
 	//run(12345)
-	for{
-		time.Sleep(1*time.Second)
+	for {
+		time.Sleep(1 * time.Second)
 	}
 
 }
-
