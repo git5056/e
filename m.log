@@ -1,54 +1,16 @@
 work2:{0/20};work1:{0/5}
-collection:{0/19}
+collection:{0/0}
 dital:{0}
 server:{0}
 serverNot:{0}
-incress:{100}  should:{100}  before:{0}
-servercached:{52}
-  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       44308
-  TCP    0.0.0.0:9080           0.0.0.0:0              LISTENING       44308
-  TCP    127.0.0.1:8080         127.0.0.1:60189        ESTABLISHED     44308
-  TCP    127.0.0.1:8080         127.0.0.1:60247        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60285        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60286        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60287        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60288        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60289        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60290        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60291        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60293        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60294        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60295        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60296        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60297        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60298        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60299        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60300        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60302        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60304        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60305        ESTABLISHED     44308
-  TCP    127.0.0.1:9080         127.0.0.1:60312        ESTABLISHED     44308
-  TCP    127.0.0.1:60189        127.0.0.1:8080         ESTABLISHED     44308
-  TCP    127.0.0.1:60247        127.0.0.1:8080         ESTABLISHED     44308
-  TCP    127.0.0.1:60285        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60286        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60287        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60288        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60289        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60290        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60291        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60293        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60294        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60295        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60296        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60297        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60298        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60299        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60300        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60302        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60304        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60305        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    127.0.0.1:60312        127.0.0.1:9080         ESTABLISHED     44308
-  TCP    [::]:8080              [::]:0                 LISTENING       44308
-  TCP    [::]:9080              [::]:0                 LISTENING       44308
+incress:{0}  should:{0}  before:{0}
+servercached:{0}
+  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       20828
+  TCP    0.0.0.0:8090           0.0.0.0:0              LISTENING       20828
+  TCP    0.0.0.0:9080           0.0.0.0:0              LISTENING       20828
+  TCP    0.0.0.0:9923           0.0.0.0:0              LISTENING       20828
+  TCP    [::]:8080              [::]:0                 LISTENING       20828
+  TCP    [::]:8090              [::]:0                 LISTENING       20828
+  TCP    [::]:9080              [::]:0                 LISTENING       20828
+  TCP    [::]:9923              [::]:0                 LISTENING       20828
 

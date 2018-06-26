@@ -63,7 +63,7 @@ func server1Init() {
 var testmap map[string]string
 
 func runmany() {
-	// return
+	return
 	testmap = make(map[string]string)
 	for i := 0; i < 100; i++ {
 		go func(url string) {

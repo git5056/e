@@ -46,9 +46,12 @@ type DiffMap struct {
 }
 
 type RequestOptions struct {
-	ImgUri string
-	Type0  string
-	Notice chan int32
+	ImgUri         string
+	Type0          string
+	Notice         chan int32
+	NotCache       int32
+	NeedRespHeader int32
+	ISSSL          int32
 }
 
 const (
@@ -134,6 +137,7 @@ func work_2() {
 		watch := time.Now()
 		for {
 			var cp *ConnProxy
+			// useProxy++
 			if useProxy < 1 {
 				cp, _ = getConn(ip)
 			} else {
@@ -141,31 +145,41 @@ func work_2() {
 			}
 			if cp != nil {
 				// logger.Println("push ok: " + ip)
-				err, k := fetchImg(cp, imgUrl, imgUrlOptions.Type0, imgUrlOptions.Notice)
-				if err != nil {
-					ConnPool.mu.Lock()
-					cp.EndTime = time.Now()
-					if _, ok := ConnPool.conn[cp.Conn]; ok {
-						ConnPool.conn[cp.Conn].IsInvalid = true
+				var err error
+				k := false
+				if imgUrlOptions.ISSSL == 0 {
+
+					err, k = fetchImg(cp, imgUrlOptions)
+					if err != nil {
+						ConnPool.mu.Lock()
+						cp.EndTime = time.Now()
+						if _, ok := ConnPool.conn[cp.Conn]; ok {
+							ConnPool.conn[cp.Conn].IsInvalid = true
+						}
+						ConnPool.mu.Unlock()
+						ConnPool.recycleChan <- 1
+						logger.Printf("download {%s} ...err:{%s}\n", imgUrl, err.Error())
+						if strings.HasSuffix(err.Error(), "EOF") {
+							nop()
+							nop()
+							goto retry
+						}
+						if !cp.IsProxy {
+							useProxy++
+							goto retry
+						}
+						tasklock.Lock()
+						task[md5s] = TFAIL
+						tasklock.Unlock()
+						imgUrlOptions.Notice <- FAILED
+						break
 					}
-					ConnPool.mu.Unlock()
-					ConnPool.recycleChan <- 1
-					logger.Printf("download {%s} ...err:{%s}\n", imgUrl, err.Error())
-					if strings.HasSuffix(err.Error(), "EOF") {
-						nop()
-						nop()
-						goto retry
-					}
-					if !cp.IsProxy {
-						// useProxy++
-						// goto retry
-					}
-					tasklock.Lock()
-					task[md5s] = TFAIL
-					tasklock.Unlock()
-					imgUrlOptions.Notice <- FAILED
-					break
+				} else {
+					err = fetchImgWithHttpsProxy(cp, imgUrlOptions)
+					nop()
+					nop()
 				}
+
 				ConnPool.mu.Lock()
 				ConnPool.conn[cp.Conn].IsBusy = false
 				ConnPool.mu.Unlock()
@@ -193,13 +207,13 @@ func work_2() {
 	}
 }
 
-func fetchImg(cp *ConnProxy, rawurl string, type0 string, notice2 chan int32) (error, bool) {
+func fetchImg(cp *ConnProxy, options RequestOptions) (error, bool) {
 	k := false
 	defer func() {
 		//signal.Notify(c, os.Interrupt)
 		// noticeChan <- 1
 	}()
-	req, err := http.NewRequest("GET", rawurl, nil)
+	req, err := http.NewRequest("GET", options.ImgUri, nil)
 	if err != nil {
 		// logger.Printf(err.Error())
 		return err, k
@@ -222,7 +236,7 @@ func fetchImg(cp *ConnProxy, rawurl string, type0 string, notice2 chan int32) (e
 		Montior.Lock.Lock()
 		Montior.serverNot++
 		Montior.Lock.Unlock()
-		notice2 <- 9
+		options.Notice <- 9
 		return nil, false
 	}
 
@@ -232,34 +246,47 @@ func fetchImg(cp *ConnProxy, rawurl string, type0 string, notice2 chan int32) (e
 
 	// 会不会造成栈溢出?
 	var temp bytes.Buffer
+	if options.NeedRespHeader == 1 {
+		nop()
+		nop()
+		temp.Write([]byte("HTTP/1.1 200 ok\r\n"))
+		headerbtyes := getBytes(resp.Header)
+		temp.Write(headerbtyes)
+		// var rw bufio.ReadWriter
+		// resp.Write(&rw)
+		// temp.ReadFrom(&rw)
+		logger.Println(string(temp.Bytes()))
+		nop()
+		nop()
+	}
 	temp.Write(b)
-	md5 := getMD5(rawurl)
+	md5 := getMD5(options.ImgUri)
 
 	// cache it
 	tasklock.Lock()
 	task[md5] = TSUCCESS
 	taskResult[md5] = TaskResult{
-		RawUri: rawurl,
+		RawUri: options.ImgUri,
 		Buf:    &temp,
-		Type0:  type0,
+		Type0:  options.Type0,
 	}
 	tasklock.Unlock()
-	numtag := getNumTag(rawurl)
-	if type0 != "" && numtag != "" {
-		numtag = type0 + "_" + numtag
+	numtag := getNumTag(options.ImgUri)
+	if options.Type0 != "" && numtag != "" {
+		numtag = options.Type0 + "_" + numtag
 		diffmaplock.Lock()
 		if _, ok := diffsource[numtag]; !ok {
 			diffsource[numtag] = DiffMap{
 				MD5:  md5,
-				Path: numtag + "_" + md5 + path.Ext(rawurl),
+				Path: numtag + "_" + md5 + path.Ext(options.ImgUri),
 			}
 		}
 		diffmaplock.Unlock()
 	}
-	CachedNotice <- 3
-	notice2 <- SUCCESSFUL
+	// CachedNotice <- 3
+	options.Notice <- SUCCESSFUL
 	cp.c++
-	logger.Printf("download ok: %d--%s", cp.c, rawurl)
+	logger.Printf("download ok: %d--%s", cp.c, options.ImgUri)
 	// ioutil.WriteFile("./1.jpg", b, os.ModeAppend)
 	return nil, !resp.Close
 }
@@ -330,31 +357,51 @@ func run_cached() {
 	}
 }
 
-func fetchImgWithProxy(cp *ConnProxy, rawurl string) error {
-	req, err := http.NewRequest("GET", rawurl, nil)
+func fetchImgWithHttpsProxy(cp *ConnProxy, options RequestOptions) error {
+	req, _ := http.NewRequest("GET", options.ImgUri, nil)
+	setHeader(req)
 	var reader io.Reader
 	DialHandle := func(network, addr string) (net.Conn, error) {
 		return cp.Conn, nil
 	}
-	pl, err := url.Parse("https://" + strings.TrimLeft(cp.Proxy, "https://"))
-	if err != nil && pl != nil && DialHandle != nil {
+
+	var DefaultTransport http.RoundTripper
+	if cp.IsProxy {
+		pl, _ := url.Parse("https://" + strings.TrimLeft(cp.Proxy, "https://"))
+		DefaultTransport = &http.Transport{
+			Proxy: http.ProxyURL(pl),
+			// Proxy: http.ProxyFromEnvironment,
+			DialTLS: DialHandle,
+			// Dial: DialHandle,
+			// Dial: (&net.Dialer{
+			// 	Timeout:   30 * time.Second,
+			// 	KeepAlive: 30 * time.Second,
+			// }).Dial,
+			DisableKeepAlives:   false,
+			TLSHandshakeTimeout: 100 * time.Second,
+		}
+
+	} else {
+		DefaultTransport = &http.Transport{
+			DialTLS: DialHandle,
+			// Dial: DialHandle,
+			// Dial: (&net.Dialer{
+			// 	Timeout:   30 * time.Second,
+			// 	KeepAlive: 30 * time.Second,
+			// }).Dial,
+			DisableKeepAlives:   false,
+			TLSHandshakeTimeout: 100 * time.Second,
+		}
 	}
-	var DefaultTransport http.RoundTripper = &http.Transport{
-		Proxy: http.ProxyURL(pl),
-		// Proxy: http.ProxyFromEnvironment,
-		DialTLS: DialHandle,
-		// Dial: DialHandle,
-		// Dial: (&net.Dialer{
-		// 	Timeout:   30 * time.Second,
-		// 	KeepAlive: 30 * time.Second,
-		// }).Dial,
-		DisableKeepAlives:   false,
-		TLSHandshakeTimeout: 100 * time.Second,
-	}
+	// if cp.IsProxy {
+	// 	DefaultTransport.Proxy = http.ProxyURL(pl)
+	// }
+
 	resp, err := DefaultTransport.RoundTrip(req)
 	//a--
 	if err != nil {
-		logger.Fatalln(err)
+		// logger.Fatalln(err)
+		return err
 	}
 	reader = resp.Body
 	body, err := ioutil.ReadAll(reader)
@@ -364,6 +411,53 @@ func fetchImgWithProxy(cp *ConnProxy, rawurl string) error {
 		// continue
 	}
 	logger.Println(string(body), 1)
+
+	Montior.Lock.Lock()
+	Montior.ok++
+	Montior.Lock.Unlock()
+
+	// 会不会造成栈溢出?
+	var temp bytes.Buffer
+	if options.NeedRespHeader == 1 {
+		nop()
+		nop()
+		temp.Write([]byte("HTTP/1.1 200 ok\r\n"))
+		headerbtyes := getBytes(resp.Header)
+		temp.Write(headerbtyes)
+		// var rw bufio.ReadWriter
+		// resp.Write(&rw)
+		// temp.ReadFrom(&rw)
+		logger.Println(string(temp.Bytes()))
+		nop()
+		nop()
+	}
+	temp.Write(body)
+	md5 := getMD5(options.ImgUri)
+
+	// cache it
+	tasklock.Lock()
+	task[md5] = TSUCCESS
+	taskResult[md5] = TaskResult{
+		RawUri: options.ImgUri,
+		Buf:    &temp,
+		Type0:  options.Type0,
+	}
+	tasklock.Unlock()
+	numtag := getNumTag(options.ImgUri)
+	if options.Type0 != "" && numtag != "" {
+		numtag = options.Type0 + "_" + numtag
+		diffmaplock.Lock()
+		if _, ok := diffsource[numtag]; !ok {
+			diffsource[numtag] = DiffMap{
+				MD5:  md5,
+				Path: numtag + "_" + md5 + path.Ext(options.ImgUri),
+			}
+		}
+		diffmaplock.Unlock()
+	}
+	// CachedNotice <- 3
+	options.Notice <- SUCCESSFUL
+
 	return nil
 }
 

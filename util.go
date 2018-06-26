@@ -166,3 +166,37 @@ func hackQueryUnescape(s string) (string, error) {
 	}
 	return s, nil
 }
+
+func getBytes(h http.Header) []byte {
+	var b bytes.Buffer
+	for a, v := range h {
+		b.WriteString(a + ":" + strings.Join(v, ";") + "\r\n")
+	}
+	b.WriteString("\r\n")
+	return b.Bytes()
+}
+
+func getHeader(b []byte) http.Header {
+	var h http.Header = make(http.Header)
+	l := len(b)
+	s := 0
+	for i, _ := range b {
+		if i < l-2 {
+			if string(b[i:i+2]) == "\r\n" {
+				spIndex := bytes.Index(b[s:i], []byte(":"))
+				if spIndex == -1 {
+					goto end
+				}
+				nop()
+				nop()
+				h[strings.Trim(string(b[s:s+spIndex]), " ")] = append(h[strings.Trim(string(b[s:s+spIndex]), " ")], strings.Trim(string(b[s+spIndex+1:i]), " "))
+				//strings.Split(
+				//, ";")
+				s = i + 2
+			}
+		}
+	}
+	nop()
+end:
+	return h
+}

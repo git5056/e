@@ -13,7 +13,8 @@ func main() {
 	// 	time.Sleep(time.Second)
 	// }
 	// main1()
-	server1Init()
+	go run(9923)
+
 	Init()
 	run_1()
 	run_2()
@@ -38,7 +39,8 @@ func main() {
 	go run_server()
 	go runmany()
 
-	run_server1()
+	go run_server1()
+	run_server2()
 	//run(12345)
 	for {
 		time.Sleep(1 * time.Second)

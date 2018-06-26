@@ -157,7 +157,11 @@ func getProxy(dst string, id int64) (*ConnProxy, int) {
 		item.ip = arr[i]
 		item.port, _ = strconv.Atoi(arr[i+1])
 		if _, ok := proxies[item.ip+":"+arr[i+1]]; !ok {
-			proxies[item.ip+":"+arr[i+1]] = item
+			// proxies[item.ip+":"+arr[i+1]] = item
+			proxies["112.115.57.20:3128"] = ProxyItem{
+				ip:   "112.115.57.20",
+				port: 3128,
+			}
 		}
 	}
 

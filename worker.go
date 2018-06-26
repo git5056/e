@@ -68,7 +68,7 @@ func working() {
 	}
 }
 
-var hh string = "https://touch.facebook.com/"
+var hh string = "https://www.baidu.com/"
 
 // var hh string = "https://www.google.com"
 
@@ -84,7 +84,9 @@ var count int = 1
 // 221.228.17.172	8181	江苏无锡	高匿
 // 120.78.78.141:8888
 // var pip string = "171.10.31.74:80"
-var pip string = "117.85.22.222:10022"
+// var pip string = "112.115.57.20:3128"
+
+var pip string = "14.215.177.38:443"
 
 func getp() {
 	var conn *net.Conn
@@ -97,8 +99,8 @@ func getp() {
 	if err != nil && pl != nil && DialHandle != nil {
 	}
 	var DefaultTransport http.RoundTripper = &http.Transport{
-		Proxy: http.ProxyURL(pl),
-		// Proxy: http.ProxyFromEnvironment,
+		// Proxy: http.ProxyURL(pl),
+		Proxy:   http.ProxyFromEnvironment, // 暂时发现，要使用transport必须要使用proxy
 		DialTLS: DialHandle,
 		// Dial: DialHandle,
 		// Dial: (&net.Dialer{
