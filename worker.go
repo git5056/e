@@ -99,8 +99,8 @@ func getp() {
 	if err != nil && pl != nil && DialHandle != nil {
 	}
 	var DefaultTransport http.RoundTripper = &http.Transport{
-		// Proxy: http.ProxyURL(pl),
-		Proxy:   http.ProxyFromEnvironment, // 暂时发现，要使用transport必须要使用proxy
+		Proxy: http.ProxyURL(pl),
+		// Proxy:   http.ProxyFromEnvironment, // 暂时发现，要使用transport必须要使用proxy
 		DialTLS: DialHandle,
 		// Dial: DialHandle,
 		// Dial: (&net.Dialer{

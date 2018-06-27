@@ -4,13 +4,21 @@ import (
 	"bytes"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 //http://www.w3school.com.cn
-var baseUrl string = "https://www.baidu.com"
+// var baseUrl string = "https://www.baidu.com"
+var referMap map[string]string
+var referMapLock sync.RWMutex
+
+func init() {
+	referMap = make(map[string]string)
+}
 
 func run_server2() {
 	myHander := &MyHander{}
@@ -28,11 +36,45 @@ type MyHander struct {
 }
 
 func (mh *MyHander) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rawUri := baseUrl + r.RequestURI
+	rawUri, err := url.QueryUnescape(r.RequestURI[1:])
+	if err != nil {
+		w.WriteHeader(400)
+		return
+	}
+	if strings.Contains(r.Referer(), "s?ie=utf") {
+		nop()
+	}
+	if len(r.Referer()) == 0 && !strings.HasPrefix(rawUri, "http://") && !strings.HasPrefix(rawUri, "https://") {
+		rawUri = "http://" + rawUri
+	}
+	refer := r.Referer()
+	if len(refer) > 0 && !strings.HasPrefix(rawUri, "http://") && !strings.HasPrefix(rawUri, "https://") {
+		referMapLock.RLock()
+		if value, ok := referMap[refer]; ok {
+			referMapLock.RUnlock()
+			rawUri = value + "/" + rawUri
+		} else {
+			referMapLock.RUnlock()
+		}
+	}
+
+	urlTemp, err := url.Parse(rawUri)
+	if err != err {
+		w.WriteHeader(400)
+		return
+	}
+	if !strings.HasPrefix(rawUri, "http://") && !strings.HasPrefix(rawUri, "https://") {
+		w.WriteHeader(400)
+		return
+	}
+	referMapLock.Lock()
+	referMap["http://"+r.Host+r.RequestURI] = urlTemp.Scheme + "://" + urlTemp.Host
+	referMapLock.Unlock()
 	ISSSL := 0
-	if strings.HasPrefix(baseUrl, "https") {
+	if strings.HasPrefix(rawUri, "https") {
 		ISSSL++
 	}
+
 	chan0 := make(chan int32, 20) // must be greater than one
 	requestImg <- RequestOptions{
 		ImgUri:         rawUri,
@@ -66,6 +108,9 @@ func (mh *MyHander) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						index = bytes.Index(temp, []byte("\r\n\r\n"))
 						for k, v := range respHeader {
 							w.Header().Set(k, strings.Join(v, ";"))
+						}
+						if _, ok := respHeader["Content-Length"]; !ok {
+							w.Header().Set("Content-Length", strconv.Itoa(len(temp)-index-4))
 						}
 						statusCode, _ := strconv.Atoi(strings.Split(string(statsLine), " ")[1])
 						if when_cache(respHeader) {

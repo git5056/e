@@ -17,6 +17,8 @@ func main() {
 
 	Init()
 	run_1()
+	go postTask()
+
 	run_2()
 	// run_montior()
 	// go func() {
@@ -46,4 +48,8 @@ func main() {
 		time.Sleep(1 * time.Second)
 	}
 
+}
+
+func Sleep() {
+	time.Sleep(time.Second * 60)
 }

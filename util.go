@@ -65,12 +65,12 @@ func getAddr(rawurl string) []string {
 	mu.Unlock()
 	url, err := url.Parse(rawurl)
 	if err != nil {
-		logger.Fatalln(err)
+		logger.Println(err)
 		return nil
 	}
 	addrs, err := net.LookupHost(url.Hostname())
 	if err != nil {
-		logger.Fatalln(err)
+		logger.Println(err, url.Hostname())
 		return nil
 	}
 	mu.Lock()

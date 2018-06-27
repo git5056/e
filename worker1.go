@@ -26,6 +26,50 @@ type ConnProxy struct {
 	c         int
 }
 
+type ProviderOption struct {
+	// DstAddr  string
+	Count    uint32
+	OverTime uint32 // 单位秒
+	BanList  string // 以;分割
+}
+
+type Provider struct {
+	Dst string
+}
+
+func (p *Provider) PushAll() {
+
+}
+
+func (p *Provider) Pop(option ProviderOption) chan net.Conn {
+	recv := make(chan net.Conn, option.Count+1)
+	var had uint32 = 0
+	ConnPool.mu.Lock()
+	for conn, cp := range ConnPool.conn {
+		if cp.Dst == p.Dst && cp.IsBusy == false {
+			cp.IsBusy = true
+			recv <- conn
+			had++
+		}
+		if had == option.Count {
+			ConnPool.mu.Unlock()
+			return recv
+		}
+	}
+	ConnPool.mu.Unlock()
+	var conns []interface{}
+	conns = append(conns, recv)
+	for i := 0; uint32(i) < option.Count-had; i++ {
+		conns = append(conns, &ConnProxy{
+			Dst:    p.Dst,
+			IsInit: false,
+			c:      0,
+		})
+	}
+	ConnPool.TaskChan <- conns
+	return recv
+}
+
 type Signal struct {
 	*ConnProxy
 	nocice chan int32
@@ -39,11 +83,16 @@ type Statistic struct {
 }
 
 var ConnPool struct {
-	connChan    chan *ConnProxy
-	ditaling    map[string]time.Time
-	conn        map[net.Conn]*ConnProxy
-	mu          *sync.RWMutex
-	recycleChan chan int
+	connChan     chan *ConnProxy
+	ditaling     map[string]time.Time
+	conn         map[net.Conn]*ConnProxy
+	mu           sync.RWMutex
+	recycleChan  chan int
+	BusyGo       map[uint32]bool
+	BusyGoLock   sync.RWMutex
+	KXCount      int32
+	TaskChan     chan []interface{}
+	TaskChanRecv chan *ConnProxy
 }
 
 type ProxyItem struct {
@@ -63,12 +112,45 @@ var work1id int32 = 0
 func init() {
 	ConnPool.connChan = make(chan *ConnProxy, 20)
 	ConnPool.conn = make(map[net.Conn]*ConnProxy)
-	ConnPool.mu = &sync.RWMutex{}
 	ConnPool.recycleChan = make(chan int, 2)
 	ConnPool.ditaling = make(map[string]time.Time)
+	ConnPool.BusyGo = make(map[uint32]bool)
+	ConnPool.KXCount = 0
+	ConnPool.TaskChan = make(chan []interface{}, 20)
+	ConnPool.TaskChanRecv = make(chan *ConnProxy, 20)
 	proxies = make(map[string]ProxyItem)
 	proxiesditalmap = make(map[int64]map[string]bool)
 	connChanmap = make(map[*ConnProxy]chan *ConnProxy)
+}
+
+func postTask() {
+	running := make(map[*ConnProxy]chan net.Conn)
+	for {
+		select {
+		case recv := <-ConnPool.TaskChanRecv:
+			s := false
+			ConnPool.mu.Lock()
+			if c, ok := ConnPool.conn[recv.Conn]; ok && !c.IsBusy {
+				ConnPool.conn[recv.Conn].IsBusy = true
+				s = true
+			}
+			ConnPool.mu.Unlock()
+			if s {
+				running[recv] <- recv.Conn
+			}
+			delete(running, recv)
+			break
+		case task := <-ConnPool.TaskChan:
+			kxc := int32(len(task)) - atomic.AddInt32(&ConnPool.KXCount, 0) - 1
+			for i := 0; i < int(kxc); i++ {
+				go work_1()
+			}
+			for _, cp := range task[1:] {
+				running[cp.(*ConnProxy)] = task[0].(chan net.Conn)
+				ConnPool.connChan <- cp.(*ConnProxy)
+			}
+		}
+	}
 }
 
 func pushConn(dst string, useProxy bool, proxy string) {
@@ -128,7 +210,7 @@ func getConn2(dst string) (*ConnProxy, chan *ConnProxy) {
 	return nil, chan1
 }
 
-func getProxy(dst string, id int64) (*ConnProxy, int) {
+func getProxy(dst string, id int64, ban []string) (*ConnProxy, int) {
 	ConnPool.mu.Lock()
 	defer ConnPool.mu.Unlock()
 	count := 0
@@ -141,7 +223,7 @@ func getProxy(dst string, id int64) (*ConnProxy, int) {
 			return cp, count
 		}
 	}
-	resp, err := http.Get("http://127.0.0.1:8000/?types=0&count=15&country=%E5%9B%BD%E5%86%85")
+	resp, err := http.Get("http://127.0.0.1:8000/?types=2&count=15&country=%E5%9B%BD%E5%A4%96")
 	if err != nil {
 		// handle error
 		return nil, 0
@@ -157,21 +239,26 @@ func getProxy(dst string, id int64) (*ConnProxy, int) {
 		item.ip = arr[i]
 		item.port, _ = strconv.Atoi(arr[i+1])
 		if _, ok := proxies[item.ip+":"+arr[i+1]]; !ok {
-			// proxies[item.ip+":"+arr[i+1]] = item
-			proxies["112.115.57.20:3128"] = ProxyItem{
-				ip:   "112.115.57.20",
-				port: 3128,
-			}
+			proxies[item.ip+":"+arr[i+1]] = item
+			// proxies["139.99.158.149:80"] = ProxyItem{
+			// 	ip:   "139.99.158.149",
+			// 	port: 80,
+			// }
 		}
 	}
 
 	if _, ok := proxiesditalmap[id]; ok {
 		return nil, count
 	}
+	strBan := ""
+	if ban != nil {
+		strBan = strings.Join(ban, ",")
+	}
+
 	countProxy := 0
 	var idMap = make(map[string]bool)
 	for key, _ := range proxies {
-		if _, ok := ConnPool.ditaling[dst+","+key]; !ok {
+		if _, ok := ConnPool.ditaling[dst+","+key]; !ok && !strings.Contains(strBan, key) {
 			ConnPool.ditaling[dst+","+key] = time.Now()
 			idMap[dst+","+key] = true
 			pushConn(dst, true, key)
@@ -223,56 +310,67 @@ func work_1() {
 	workid := atomic.AddInt32(&work1id, 1)
 	for {
 		itidle(FlagWorkType1, workid)
-		cp := <-ConnPool.connChan
-		itbusy(FlagWorkType1, workid)
-		if cp.IsInit {
-			time.Sleep(time.Second * 1)
-			continue
-		}
-	retry:
-		try_count := 0
-		dst := cp.Dst
-		if cp.IsProxy {
-			dst = cp.Proxy
-		}
-		conn, err := net.Dial("tcp", dst)
-		if err != nil {
-			cp.Stat.F += 1
-			if try_count < retryCount {
-				logger.Printf("retry dial %s\n", dst)
-				goto retry
-			} else if try_count < 5 {
-				logger.Printf("retry dial %s\n", dst)
-				ConnPool.connChan <- cp
+		atomic.AddInt32(&ConnPool.KXCount, 1)
+		overTime := time.NewTicker(time.Second * 15)
+		select {
+		case <-overTime.C: // 空闲
+			atomic.AddInt32(&work1id, -1)
+			atomic.AddInt32(&ConnPool.KXCount, -1)
+			return
+		case cp := <-ConnPool.connChan:
+			atomic.AddInt32(&ConnPool.KXCount, -1)
+			itbusy(FlagWorkType1, workid)
+			if cp.IsInit {
+				time.Sleep(time.Second * 1)
+				continue
 			}
+		retry:
+			try_count := 0
+			dst := cp.Dst
+			if cp.IsProxy {
+				dst = cp.Proxy
+			}
+			conn, err := net.Dial("tcp", dst)
+			if err != nil {
+				cp.Stat.F += 1
+				if try_count < retryCount {
+					logger.Printf("retry dial %s\n", dst)
+					goto retry
+				} else if try_count < 5 {
+					logger.Printf("retry dial %s\n", dst)
+					ConnPool.connChan <- cp
+				}
+				if !cp.IsProxy {
+					removeDitaling(cp.Dst)
+				} else {
+					removeDitaling(cp.Dst + "," + cp.Proxy)
+				}
+				continue
+			}
+			// logger.Println("collection successful: " + cp.Dst)
+			cp.StartTime = time.Now()
+			cp.Stat.S += 1
+			cp.IsInit = true
+			cp.Conn = conn
+			ConnPool.mu.Lock()
+			ConnPool.conn[conn] = cp
+			connChanmaplock.Lock()
+			if chan2, ok := connChanmap[cp]; ok {
+				cp.IsBusy = true
+				chan2 <- cp
+				delete(connChanmap, cp)
+			}
+			connChanmaplock.Unlock()
+			ConnPool.mu.Unlock()
+			ConnPool.TaskChanRecv <- cp
 			if !cp.IsProxy {
 				removeDitaling(cp.Dst)
 			} else {
 				removeDitaling(cp.Dst + "," + cp.Proxy)
 			}
-			continue
+			//ConnPool.connChan <- cp
+
 		}
-		// logger.Println("collection successful: " + cp.Dst)
-		cp.StartTime = time.Now()
-		cp.Stat.S += 1
-		cp.IsInit = true
-		cp.Conn = conn
-		ConnPool.mu.Lock()
-		ConnPool.conn[conn] = cp
-		connChanmaplock.Lock()
-		if chan2, ok := connChanmap[cp]; ok {
-			cp.IsBusy = true
-			chan2 <- cp
-			delete(connChanmap, cp)
-		}
-		connChanmaplock.Unlock()
-		ConnPool.mu.Unlock()
-		if !cp.IsProxy {
-			removeDitaling(cp.Dst)
-		} else {
-			removeDitaling(cp.Dst + "," + cp.Proxy)
-		}
-		//ConnPool.connChan <- cp
 	}
 }
 

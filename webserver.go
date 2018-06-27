@@ -30,7 +30,7 @@ const (
 
 func init() {
 	re, _ = regexp.Compile(".*(img=[^&]*)(&rand=\\d*)?$")
-	regexpTirmRand, _ = regexp.Compile("&rand=\\d*$")
+	regexpTirmRand, _ = regexp.Compile("(&|\\?)rand=\\d*$")
 	regexpClear, _ = regexp.Compile("[^\\w\\W\\d\\D\\[\\]]|\\\\|\\/|:|\\*|\\?|\"|<|>|\\||_|\\s")
 	ragexptype, _ = regexp.Compile("type=[^&]*&?")
 	ragexpup5, _ = regexp.Compile("%u....")
@@ -170,7 +170,12 @@ func SendImage(w http.ResponseWriter, buf *bytes.Buffer, rawurl string) {
 func SendLocation(w http.ResponseWriter, oldUri string) {
 	rndnum := strconv.Itoa(int(time.Now().Unix()))
 	newurl := regexpTirmRand.ReplaceAllString(oldUri, "")
-	newurl = newurl + "&rand=" + rndnum
+	if strings.Contains(newurl, "?") {
+		newurl = newurl + "&rand" + rndnum
+	} else {
+		newurl = newurl + "?rand=" + rndnum
+	}
+
 	w.Header().Set("Location", newurl)
 	w.WriteHeader(302)
 }

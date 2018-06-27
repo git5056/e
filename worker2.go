@@ -34,6 +34,9 @@ var diffsource map[string]DiffMap
 var diffmaplock sync.RWMutex
 var CachedNotice chan int
 
+var banMap map[string]map[string]int
+var banMapLock sync.RWMutex
+
 type TaskResult struct {
 	RawUri string
 	Buf    *bytes.Buffer
@@ -75,12 +78,28 @@ func init() {
 
 	diffsource = make(map[string]DiffMap)
 	CachedNotice = make(chan int, 20)
+
+	banMap = make(map[string]map[string]int)
 }
 
 func run_2() {
 	for i := 0; i < 20; i++ {
 		go work_2()
 	}
+}
+
+func getBan(host string) []string {
+	var ban []string
+	banMapLock.RLock()
+	defer banMapLock.RUnlock()
+	banlist, ok := banMap[host]
+	if !ok {
+		return nil
+	}
+	for item, _ := range banlist {
+		ban = append(ban, item)
+	}
+	return ban
 }
 
 func work_2() {
@@ -137,17 +156,22 @@ func work_2() {
 		watch := time.Now()
 		for {
 			var cp *ConnProxy
-			// useProxy++
+			useProxy++
 			if useProxy < 1 {
+				pr := Provider{"123.125.115.110:80"}
+				r := (&pr).Pop(ProviderOption{Count: 1})
+				<-r
 				cp, _ = getConn(ip)
 			} else {
-				cp, _ = getProxy(ip, watch.Unix())
+				urlTemp, _ := url.Parse(imgUrlOptions.ImgUri)
+				ban := getBan(urlTemp.Host)
+				cp, _ = getProxy(ip, watch.Unix(), ban)
 			}
 			if cp != nil {
 				// logger.Println("push ok: " + ip)
 				var err error
 				k := false
-				if imgUrlOptions.ISSSL == 0 {
+				if imgUrlOptions.ISSSL == 0 && !cp.IsProxy {
 
 					err, k = fetchImg(cp, imgUrlOptions)
 					if err != nil {
@@ -176,6 +200,17 @@ func work_2() {
 					}
 				} else {
 					err = fetchImgWithHttpsProxy(cp, imgUrlOptions)
+					if err != nil && strings.Contains(err.Error(), "An existing connection was forcibly closed by the remote host") {
+						urlTemp, _ := url.Parse(imgUrlOptions.ImgUri)
+						banMapLock.Lock()
+						if t, ok := banMap[urlTemp.Host]; ok {
+							t[cp.Proxy] = 1
+						} else {
+							banMap[urlTemp.Host] = make(map[string]int)
+							banMap[urlTemp.Host][cp.Proxy] = 1
+						}
+						banMapLock.Unlock()
+					}
 					nop()
 					nop()
 				}
@@ -393,14 +428,11 @@ func fetchImgWithHttpsProxy(cp *ConnProxy, options RequestOptions) error {
 			TLSHandshakeTimeout: 100 * time.Second,
 		}
 	}
-	// if cp.IsProxy {
-	// 	DefaultTransport.Proxy = http.ProxyURL(pl)
-	// }
 
 	resp, err := DefaultTransport.RoundTrip(req)
 	//a--
 	if err != nil {
-		// logger.Fatalln(err)
+		logger.Println(err)
 		return err
 	}
 	reader = resp.Body

@@ -1,16 +1,21 @@
 work2:{0/20};work1:{0/5}
-collection:{0/0}
+collection:{5/5}
 dital:{0}
 server:{0}
 serverNot:{0}
 incress:{0}  should:{0}  before:{0}
 servercached:{0}
-  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       20828
-  TCP    0.0.0.0:8090           0.0.0.0:0              LISTENING       20828
-  TCP    0.0.0.0:9080           0.0.0.0:0              LISTENING       20828
-  TCP    0.0.0.0:9923           0.0.0.0:0              LISTENING       20828
-  TCP    [::]:8080              [::]:0                 LISTENING       20828
-  TCP    [::]:8090              [::]:0                 LISTENING       20828
-  TCP    [::]:9080              [::]:0                 LISTENING       20828
-  TCP    [::]:9923              [::]:0                 LISTENING       20828
+  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       1280
+  TCP    0.0.0.0:8090           0.0.0.0:0              LISTENING       1280
+  TCP    0.0.0.0:9080           0.0.0.0:0              LISTENING       1280
+  TCP    0.0.0.0:9923           0.0.0.0:0              LISTENING       1280
+  TCP    10.255.0.16:61799      123.125.115.110:80     ESTABLISHED     1280
+  TCP    10.255.0.16:61800      123.125.115.110:80     ESTABLISHED     1280
+  TCP    10.255.0.16:61801      123.125.115.110:80     ESTABLISHED     1280
+  TCP    10.255.0.16:61802      123.125.115.110:80     ESTABLISHED     1280
+  TCP    10.255.0.16:61803      123.125.115.110:80     ESTABLISHED     1280
+  TCP    [::]:8080              [::]:0                 LISTENING       1280
+  TCP    [::]:8090              [::]:0                 LISTENING       1280
+  TCP    [::]:9080              [::]:0                 LISTENING       1280
+  TCP    [::]:9923              [::]:0                 LISTENING       1280
 
