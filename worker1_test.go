@@ -11,7 +11,8 @@ func TestMain(m *testing.M) {
 	op := ProviderOption{
 		Count: 5,
 	}
-	p := Provider{"123.125.115.110:80"}
+	p := Provider{Dst: "123.125.115.110:80"}
+	p.Init()
 	r := (&p).Pop(op)
 	for {
 		a := <-r

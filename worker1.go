@@ -19,6 +19,7 @@ type ConnProxy struct {
 	IsProxy   bool
 	IsInvalid bool
 	IsBusy    bool
+	IsPrivate bool
 	Stat      Statistic
 	Conn      net.Conn
 	StartTime time.Time
@@ -34,19 +35,35 @@ type ProviderOption struct {
 }
 
 type Provider struct {
-	Dst string
+	Dst              string
+	Conns            []*ConnProxy
+	ConnChan         chan net.Conn
+	IsConnChanClosed bool
+	LockSelf         sync.RWMutex
+}
+
+func (p *Provider) Init() {
+	p.ConnChan = make(chan net.Conn, 20)
+	p.IsConnChanClosed = false
 }
 
 func (p *Provider) PushAll() {
-
+	p.LockSelf.Lock()
+	p.IsConnChanClosed = true
+	ConnPool.mu.Lock()
+	for _, cp := range p.Conns {
+		cp.IsBusy = false
+	}
+	ConnPool.mu.Unlock()
+	p.LockSelf.Unlock()
 }
 
 func (p *Provider) Pop(option ProviderOption) chan net.Conn {
-	recv := make(chan net.Conn, option.Count+1)
+	recv := p.ConnChan
 	var had uint32 = 0
 	ConnPool.mu.Lock()
 	for conn, cp := range ConnPool.conn {
-		if cp.Dst == p.Dst && cp.IsBusy == false {
+		if cp.IsInit && cp.Dst == p.Dst && cp.IsBusy == false {
 			cp.IsBusy = true
 			recv <- conn
 			had++
@@ -57,15 +74,16 @@ func (p *Provider) Pop(option ProviderOption) chan net.Conn {
 		}
 	}
 	ConnPool.mu.Unlock()
-	var conns []interface{}
-	conns = append(conns, recv)
 	for i := 0; uint32(i) < option.Count-had; i++ {
-		conns = append(conns, &ConnProxy{
+		p.Conns = append(p.Conns, &ConnProxy{
 			Dst:    p.Dst,
 			IsInit: false,
 			c:      0,
 		})
+		// conns = append(conns, p.Conns[len(p.Conns)-1])
 	}
+	var conns []interface{}
+	conns = append(conns, p)
 	ConnPool.TaskChan <- conns
 	return recv
 }
@@ -124,7 +142,7 @@ func init() {
 }
 
 func postTask() {
-	running := make(map[*ConnProxy]chan net.Conn)
+	running := make(map[*ConnProxy]*Provider)
 	for {
 		select {
 		case recv := <-ConnPool.TaskChanRecv:
@@ -136,7 +154,17 @@ func postTask() {
 			}
 			ConnPool.mu.Unlock()
 			if s {
-				running[recv] <- recv.Conn
+				ptemp := running[recv]
+				ptemp.LockSelf.RLock()
+				if !ptemp.IsConnChanClosed {
+					ptemp.ConnChan <- recv.Conn
+					// ptemp.LockSelf.Lock()
+					// ptemp.Count++
+					ConnPool.mu.Lock()
+					ConnPool.conn[recv.Conn].IsInit = true
+					ConnPool.mu.Unlock()
+				}
+				ptemp.LockSelf.RUnlock()
 			}
 			delete(running, recv)
 			break
@@ -145,9 +173,9 @@ func postTask() {
 			for i := 0; i < int(kxc); i++ {
 				go work_1()
 			}
-			for _, cp := range task[1:] {
-				running[cp.(*ConnProxy)] = task[0].(chan net.Conn)
-				ConnPool.connChan <- cp.(*ConnProxy)
+			for _, cp := range task[0].(*Provider).Conns {
+				running[cp] = task[0].(*Provider)
+				ConnPool.connChan <- cp
 			}
 		}
 	}
@@ -350,7 +378,7 @@ func work_1() {
 			// logger.Println("collection successful: " + cp.Dst)
 			cp.StartTime = time.Now()
 			cp.Stat.S += 1
-			cp.IsInit = true
+			// cp.IsInit = true
 			cp.Conn = conn
 			ConnPool.mu.Lock()
 			ConnPool.conn[conn] = cp

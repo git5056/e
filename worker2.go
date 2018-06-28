@@ -156,11 +156,25 @@ func work_2() {
 		watch := time.Now()
 		for {
 			var cp *ConnProxy
-			useProxy++
+			useProxy = 0
 			if useProxy < 1 {
-				pr := Provider{"123.125.115.110:80"}
+				pr := Provider{Dst: ip}
+				pr.Init()
 				r := (&pr).Pop(ProviderOption{Count: 1})
-				<-r
+				ticker := time.NewTicker(time.Second * 20)
+				select {
+				case <-ticker.C:
+					pr.PushAll()
+					continue
+				case conn := <-r:
+					_, k := Get(conn, imgUrlOptions)
+					if k {
+						pr.PushAll()
+					} else {
+
+					}
+
+				}
 				cp, _ = getConn(ip)
 			} else {
 				urlTemp, _ := url.Parse(imgUrlOptions.ImgUri)
@@ -322,6 +336,85 @@ func fetchImg(cp *ConnProxy, options RequestOptions) (error, bool) {
 	options.Notice <- SUCCESSFUL
 	cp.c++
 	logger.Printf("download ok: %d--%s", cp.c, options.ImgUri)
+	// ioutil.WriteFile("./1.jpg", b, os.ModeAppend)
+	return nil, !resp.Close
+}
+
+func Get(conn net.Conn, options RequestOptions) (error, bool) {
+	k := false
+	req, err := http.NewRequest("GET", options.ImgUri, nil)
+	if err != nil {
+		// logger.Printf(err.Error())
+		return err, k
+	}
+	setHeader(req)
+	if err := req.Write(conn); err != nil {
+		// logger.Printf(err.Error())
+		return err, k
+	}
+	bufreader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(bufreader, req)
+	if err != nil {
+		return err, k
+	}
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err, k
+	}
+	if len(b) == 28 {
+		Montior.Lock.Lock()
+		Montior.serverNot++
+		Montior.Lock.Unlock()
+		options.Notice <- 9
+		return nil, false
+	}
+
+	Montior.Lock.Lock()
+	Montior.ok++
+	Montior.Lock.Unlock()
+
+	// 会不会造成栈溢出?
+	var temp bytes.Buffer
+	if options.NeedRespHeader == 1 {
+		nop()
+		nop()
+		temp.Write([]byte("HTTP/1.1 200 ok\r\n"))
+		headerbtyes := getBytes(resp.Header)
+		temp.Write(headerbtyes)
+		// var rw bufio.ReadWriter
+		// resp.Write(&rw)
+		// temp.ReadFrom(&rw)
+		logger.Println(string(temp.Bytes()))
+		nop()
+		nop()
+	}
+	temp.Write(b)
+	md5 := getMD5(options.ImgUri)
+
+	// cache it
+	tasklock.Lock()
+	task[md5] = TSUCCESS
+	taskResult[md5] = TaskResult{
+		RawUri: options.ImgUri,
+		Buf:    &temp,
+		Type0:  options.Type0,
+	}
+	tasklock.Unlock()
+	numtag := getNumTag(options.ImgUri)
+	if options.Type0 != "" && numtag != "" {
+		numtag = options.Type0 + "_" + numtag
+		diffmaplock.Lock()
+		if _, ok := diffsource[numtag]; !ok {
+			diffsource[numtag] = DiffMap{
+				MD5:  md5,
+				Path: numtag + "_" + md5 + path.Ext(options.ImgUri),
+			}
+		}
+		diffmaplock.Unlock()
+	}
+	// CachedNotice <- 3
+	options.Notice <- SUCCESSFUL
+	logger.Printf("download ok: %d--%s", options.ImgUri)
 	// ioutil.WriteFile("./1.jpg", b, os.ModeAppend)
 	return nil, !resp.Close
 }
